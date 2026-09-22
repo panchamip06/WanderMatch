@@ -1,28 +1,38 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import type { Trip, ItineraryItem } from '../types';
 import { StatusBadge } from '../components/StatusBadge';
 import { ApiService } from '../services/api';
 import { useAuth } from '../services/auth';
-import { Calendar, MapPin, Users, Lock, ChevronRight, Sparkles, Plus, Crown, CheckCircle } from 'lucide-react';
+import { TripWebSocketClient } from '../services/websocket';
+import {
+  Calendar, MapPin, Users, Lock, ChevronRight, Sparkles,
+  Plus, Crown, CheckCircle, ArrowLeft, Copy, Check
+} from 'lucide-react';
 
 interface TripHomeScreenProps {
-  trips: Trip[];
-  selectedTrip: Trip | null;
-  onSelectTrip: (t: Trip) => void;
-  onOpenSlot: (item: ItineraryItem) => void;
-  onRefreshTrip: () => void;
-  onOpenCreateTrip: () => void;
+  // Optional props for backwards compatibility
+  trips?: Trip[];
+  selectedTrip?: Trip | null;
+  onSelectTrip?: (t: Trip) => void;
+  onOpenSlot?: (item: ItineraryItem) => void;
+  onRefreshTrip?: () => void;
+  onOpenCreateTrip?: () => void;
 }
 
 export const TripHomeScreen: React.FC<TripHomeScreenProps> = ({
-  trips,
-  selectedTrip,
-  onSelectTrip,
-  onOpenSlot,
-  onRefreshTrip,
-  onOpenCreateTrip,
+  selectedTrip: propTrip,
+  onRefreshTrip: propRefresh,
 }) => {
-  const { userId } = useAuth();
+  const { tripId } = useParams<{ tripId: string }>();
+  const navigate = useNavigate();
+  const { userId, token } = useAuth();
+
+  const [trip, setTrip] = useState<Trip | null>(propTrip || null);
+  const [loading, setLoading] = useState<boolean>(!propTrip);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState<boolean>(false);
+
   const [showAddSlotDay, setShowAddSlotDay] = useState<number | null>(null);
   const [slotTitle, setSlotTitle] = useState('');
   const [slotType, setSlotType] = useState('activity');
@@ -32,35 +42,62 @@ export const TripHomeScreen: React.FC<TripHomeScreenProps> = ({
   const [slotExplanation, setSlotExplanation] = useState('');
   const [addingSlot, setAddingSlot] = useState(false);
 
-  if (!selectedTrip) {
-    return (
-      <div className="flex justify-center items-center h-64 text-gray-500">
-        Loading seeded group trips...
-      </div>
-    );
-  }
+  const effectiveTripId = tripId || propTrip?.trip_id;
 
-  const activeItn = selectedTrip.active_itinerary;
-  const items = activeItn?.items || [];
-  const isModeA = selectedTrip.trip_mode === 'admin_led';
-  const isOwner = selectedTrip.owner_user_id === userId;
+  const loadTrip = useCallback(async () => {
+    if (!effectiveTripId) return;
+    try {
+      const fetched = await ApiService.getTripDetail(effectiveTripId, token || undefined);
+      setTrip(fetched);
+      if (propRefresh) propRefresh();
+    } catch (e: any) {
+      console.error('Failed to load trip detail:', e);
+      setError(e.message || 'Trip not found');
+    } finally {
+      setLoading(false);
+    }
+  }, [effectiveTripId, token, propRefresh]);
 
-  // Group items by day_index
-  const days = items.reduce((acc, item) => {
-    acc[item.day_index] = acc[item.day_index] || [];
-    acc[item.day_index].push(item);
-    return acc;
-  }, {} as Record<number, ItineraryItem[]>);
+  useEffect(() => {
+    loadTrip();
+  }, [loadTrip]);
+
+  // Real-time WebSocket connection to this trip
+  useEffect(() => {
+    if (!effectiveTripId) return;
+
+    const wsClient = new TripWebSocketClient(effectiveTripId, userId || 'anon');
+    wsClient.connect();
+
+    const unsubscribe = wsClient.subscribe((msg: any) => {
+      console.log('[TripHomeScreen] Live event received:', msg);
+      if (msg.type === 'itinerary_updated' || msg.type === 'member_joined' || msg.type === 'proposal_resolved') {
+        loadTrip();
+      }
+    });
+
+    return () => {
+      unsubscribe();
+      wsClient.disconnect();
+    };
+  }, [effectiveTripId, userId, loadTrip]);
+
+  const handleCopyTripId = () => {
+    if (!effectiveTripId) return;
+    navigator.clipboard.writeText(effectiveTripId);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   const handleAddSlot = async (dayIndex: number) => {
-    if (!slotTitle.trim()) return;
+    if (!slotTitle.trim() || !trip) return;
     setAddingSlot(true);
     try {
       await ApiService.addItineraryItem(
-        selectedTrip.trip_id,
+        trip.trip_id,
         {
           day_index: dayIndex,
-          title: slotTitle,
+          title: slotTitle.trim(),
           item_type: slotType,
           starts_at: slotStartsAt,
           cost: slotCost,
@@ -68,12 +105,12 @@ export const TripHomeScreen: React.FC<TripHomeScreenProps> = ({
           explanation: slotExplanation,
           source: 'user',
         },
-        userId
+        token || undefined
       );
       setSlotTitle('');
       setSlotExplanation('');
       setShowAddSlotDay(null);
-      onRefreshTrip();
+      await loadTrip();
     } catch (e: any) {
       alert(`Failed to add slot: ${e.message}`);
     } finally {
@@ -83,28 +120,97 @@ export const TripHomeScreen: React.FC<TripHomeScreenProps> = ({
 
   const handleConfirmSlot = async (itemId: string, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (!trip) return;
     try {
       await ApiService.updateItineraryItem(
-        selectedTrip.trip_id,
+        trip.trip_id,
         itemId,
         { status: 'confirmed' },
-        userId
+        token || undefined
       );
-      onRefreshTrip();
+      await loadTrip();
     } catch (e: any) {
       alert(`Failed to confirm slot: ${e.message}`);
     }
   };
 
+  if (loading) {
+    return (
+      <div className="flex flex-col justify-center items-center h-64 text-gray-500 space-y-3">
+        <div className="w-8 h-8 border-3 border-blue-600 border-t-transparent rounded-full animate-spin" />
+        <p className="text-sm font-semibold">Loading trip itinerary from database...</p>
+      </div>
+    );
+  }
+
+  if (error || !trip) {
+    return (
+      <div className="text-center py-16 bg-white rounded-3xl border border-gray-200 max-w-lg mx-auto p-8">
+        <h2 className="text-xl font-bold text-gray-900 mb-2">Trip Not Found</h2>
+        <p className="text-sm text-gray-500 mb-6">
+          {error || 'This trip does not exist or you do not have permission to view it.'}
+        </p>
+        <Link
+          to="/app"
+          className="inline-flex items-center px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm shadow-md"
+        >
+          <ArrowLeft className="w-4 h-4 mr-2" />
+          Back to My Trips
+        </Link>
+      </div>
+    );
+  }
+
+  const activeItn = trip.active_itinerary;
+  const items = activeItn?.items || [];
+  const isModeA = trip.trip_mode === 'admin_led';
+  const isOwner = trip.owner_user_id === userId;
+
+  // Group items by day_index
+  const days = items.reduce((acc, item) => {
+    acc[item.day_index] = acc[item.day_index] || [];
+    acc[item.day_index].push(item);
+    return acc;
+  }, {} as Record<number, ItineraryItem[]>);
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 max-w-6xl mx-auto">
+      {/* Navigation Breadcrumb */}
+      <div className="flex items-center justify-between">
+        <Link
+          to="/app"
+          className="inline-flex items-center text-xs font-bold text-gray-500 hover:text-gray-900 transition-colors"
+        >
+          <ArrowLeft className="w-4 h-4 mr-1.5" />
+          Back to My Trips
+        </Link>
+
+        {/* Share Trip ID */}
+        <button
+          onClick={handleCopyTripId}
+          className="inline-flex items-center text-xs font-semibold px-3 py-1.5 rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-700 transition-colors"
+        >
+          {copied ? (
+            <>
+              <Check className="w-3.5 h-3.5 mr-1 text-green-600" />
+              <span>Copied Trip ID!</span>
+            </>
+          ) : (
+            <>
+              <Copy className="w-3.5 h-3.5 mr-1 text-gray-500" />
+              <span>Copy ID: {trip.trip_id}</span>
+            </>
+          )}
+        </button>
+      </div>
+
       {/* Trip Header Banner */}
-      <div className="bg-white rounded-2xl p-6 border border-gray-200 shadow-xs">
+      <div className="bg-white rounded-3xl p-6 sm:p-8 border border-gray-200 shadow-xs">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-2xl font-bold text-gray-900">{selectedTrip.title}</h1>
-              <span className="text-xs bg-indigo-100 text-indigo-800 font-semibold px-2 py-0.5 rounded">
+              <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">{trip.title}</h1>
+              <span className="text-xs bg-indigo-100 text-indigo-800 font-semibold px-2.5 py-0.5 rounded-full">
                 v{activeItn?.version || 1}
               </span>
 
@@ -128,90 +234,69 @@ export const TripHomeScreen: React.FC<TripHomeScreenProps> = ({
               </span>
             </div>
 
-            <div className="flex flex-wrap items-center gap-4 mt-2 text-sm text-gray-500">
+            <div className="flex flex-wrap items-center gap-4 mt-3 text-sm text-gray-500">
               <span className="flex items-center">
                 <MapPin className="w-4 h-4 mr-1 text-gray-400" />
-                Destination: {selectedTrip.destination_city_id}
+                Destination: {trip.destination_city_id}
               </span>
               <span className="flex items-center">
                 <Calendar className="w-4 h-4 mr-1 text-gray-400" />
-                {selectedTrip.start_date} to {selectedTrip.end_date}
+                {trip.start_date} to {trip.end_date}
               </span>
               <span className="flex items-center">
                 <Users className="w-4 h-4 mr-1 text-gray-400" />
-                Members: {selectedTrip.members?.length || 1} ({isOwner ? 'You are Admin' : 'Member'})
+                Members: {trip.members?.length || 1} ({isOwner ? 'You are Admin' : 'Member'})
               </span>
             </div>
-          </div>
-
-          {/* Action & Switcher Controls */}
-          <div className="flex items-center space-x-3">
-            <button
-              onClick={onOpenCreateTrip}
-              className="flex items-center text-xs font-semibold px-3 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white shadow-xs"
-            >
-              <Plus className="w-3.5 h-3.5 mr-1" />
-              New / Join Trip
-            </button>
-
-            <select
-              value={selectedTrip.trip_id}
-              onChange={(e) => {
-                const found = trips.find((t) => t.trip_id === e.target.value);
-                if (found) onSelectTrip(found);
-              }}
-              className="text-xs bg-gray-50 border border-gray-300 rounded-lg px-2.5 py-2 font-medium text-gray-800"
-            >
-              {trips.map((t) => (
-                <option key={t.trip_id} value={t.trip_id}>
-                  {t.title} ({t.trip_mode === 'admin_led' ? 'Mode A' : 'Mode NA'})
-                </option>
-              ))}
-            </select>
           </div>
         </div>
       </div>
 
-      {/* Member Roster Card */}
-      <div className="bg-white rounded-xl p-4 border border-gray-200 flex flex-wrap items-center justify-between gap-3 text-xs">
+      {/* Member Roster Card (Database-backed) */}
+      <div className="bg-white rounded-2xl p-4 sm:p-5 border border-gray-200 flex flex-wrap items-center justify-between gap-3 text-xs">
         <div className="flex items-center space-x-2">
           <span className="font-bold text-gray-700">Trip Members:</span>
-          <div className="flex flex-wrap gap-1.5">
-            {selectedTrip.members?.map((m) => (
-              <span
-                key={m.member_id}
-                className={`px-2 py-0.5 rounded-md font-medium border ${
-                  m.role === 'owner'
-                    ? 'bg-indigo-50 text-indigo-800 border-indigo-200'
-                    : 'bg-gray-50 text-gray-700 border-gray-200'
-                }`}
-              >
-                {m.user_id} ({m.role})
-              </span>
-            ))}
+          <div className="flex flex-wrap gap-2">
+            {trip.members && trip.members.length > 0 ? (
+              trip.members.map((m) => (
+                <span
+                  key={m.member_id}
+                  className={`px-2.5 py-1 rounded-lg font-medium border flex items-center space-x-1.5 ${
+                    m.role === 'owner'
+                      ? 'bg-indigo-50 text-indigo-800 border-indigo-200 font-bold'
+                      : 'bg-gray-50 text-gray-700 border-gray-200'
+                  }`}
+                >
+                  <span>{m.user_id}</span>
+                  <span className="text-[10px] text-gray-400">({m.role})</span>
+                </span>
+              ))
+            ) : (
+              <span className="text-gray-400">No members loaded</span>
+            )}
           </div>
         </div>
 
         <div className="text-gray-400 text-[11px]">
-          Share weights: 1.000 (Largest-remainder split ready)
+          Share weights: 1.000 (PS-11 largest-remainder split ready)
         </div>
       </div>
 
       {/* Overview Stats */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-white p-4 rounded-xl border border-gray-200">
+        <div className="bg-white p-5 rounded-2xl border border-gray-200">
           <span className="text-xs text-gray-500 font-medium">Estimated Total Cost</span>
           <p className="text-xl font-bold text-gray-900 mt-1">
-            {activeItn?.currency || selectedTrip.home_currency} {activeItn?.total_cost || '0.00'}
+            {activeItn?.currency || trip.home_currency} {activeItn?.total_cost || '0.00'}
           </p>
         </div>
-        <div className="bg-white p-4 rounded-xl border border-gray-200">
+        <div className="bg-white p-5 rounded-2xl border border-gray-200">
           <span className="text-xs text-gray-500 font-medium">Carbon Footprint</span>
           <p className="text-xl font-bold text-emerald-700 mt-1">
             {activeItn?.total_carbon_kg || 0} kg CO₂
           </p>
         </div>
-        <div className="bg-white p-4 rounded-xl border border-gray-200">
+        <div className="bg-white p-5 rounded-2xl border border-gray-200">
           <span className="text-xs text-gray-500 font-medium">Itinerary Generator</span>
           <div className="flex items-center mt-1">
             <Sparkles className="w-4 h-4 text-purple-600 mr-1.5" />
@@ -225,10 +310,10 @@ export const TripHomeScreen: React.FC<TripHomeScreenProps> = ({
       {/* Day by Day Slots */}
       <div className="space-y-6">
         <div className="flex items-center justify-between">
-          <h2 className="text-lg font-bold text-gray-900">Day-by-Day Shared Itinerary</h2>
+          <h2 className="text-xl font-bold text-gray-900">Day-by-Day Shared Itinerary</h2>
           <button
             onClick={() => setShowAddSlotDay(1)}
-            className="text-xs font-semibold text-blue-600 hover:text-blue-800 flex items-center"
+            className="text-xs font-bold text-blue-600 hover:text-blue-800 flex items-center px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 transition-colors"
           >
             <Plus className="w-3.5 h-3.5 mr-1" /> Add Activity Slot
           </button>
@@ -236,14 +321,14 @@ export const TripHomeScreen: React.FC<TripHomeScreenProps> = ({
 
         {/* Add Slot Drawer */}
         {showAddSlotDay !== null && (
-          <div className="bg-blue-50/60 rounded-xl border border-blue-200 p-5 space-y-3">
+          <div className="bg-blue-50/70 rounded-2xl border border-blue-200 p-5 space-y-4 shadow-sm">
             <div className="flex justify-between items-center">
               <span className="font-bold text-sm text-blue-900">
                 Add Activity Slot for Day {showAddSlotDay}
               </span>
               <button
                 onClick={() => setShowAddSlotDay(null)}
-                className="text-xs text-gray-400 hover:text-gray-600"
+                className="text-xs text-gray-500 hover:text-gray-700 font-semibold"
               >
                 Cancel
               </button>
@@ -257,7 +342,7 @@ export const TripHomeScreen: React.FC<TripHomeScreenProps> = ({
                   placeholder="e.g. Visit Daulatabad Fort & Caves"
                   value={slotTitle}
                   onChange={(e) => setSlotTitle(e.target.value)}
-                  className="mt-1 w-full text-xs bg-white border border-gray-300 rounded-lg px-3 py-2"
+                  className="mt-1 w-full text-xs bg-white border border-gray-300 rounded-xl px-3.5 py-2.5"
                 />
               </div>
 
@@ -269,7 +354,7 @@ export const TripHomeScreen: React.FC<TripHomeScreenProps> = ({
                   max={14}
                   value={showAddSlotDay}
                   onChange={(e) => setShowAddSlotDay(parseInt(e.target.value) || 1)}
-                  className="mt-1 w-full text-xs bg-white border border-gray-300 rounded-lg px-3 py-2"
+                  className="mt-1 w-full text-xs bg-white border border-gray-300 rounded-xl px-3.5 py-2.5"
                 />
               </div>
             </div>
@@ -280,7 +365,7 @@ export const TripHomeScreen: React.FC<TripHomeScreenProps> = ({
                 <select
                   value={slotType}
                   onChange={(e) => setSlotType(e.target.value)}
-                  className="mt-1 w-full text-xs bg-white border border-gray-300 rounded-lg px-3 py-2"
+                  className="mt-1 w-full text-xs bg-white border border-gray-300 rounded-xl px-3 py-2"
                 >
                   <option value="activity">Activity</option>
                   <option value="meal">Meal / Dining</option>
@@ -296,17 +381,17 @@ export const TripHomeScreen: React.FC<TripHomeScreenProps> = ({
                   placeholder="10:00"
                   value={slotStartsAt}
                   onChange={(e) => setSlotStartsAt(e.target.value)}
-                  className="mt-1 w-full text-xs bg-white border border-gray-300 rounded-lg px-3 py-2"
+                  className="mt-1 w-full text-xs bg-white border border-gray-300 rounded-xl px-3 py-2"
                 />
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold text-gray-700">Cost ({selectedTrip.home_currency})</label>
+                <label className="block text-[11px] font-semibold text-gray-700">Cost ({trip.home_currency})</label>
                 <input
                   type="text"
                   value={slotCost}
                   onChange={(e) => setSlotCost(e.target.value)}
-                  className="mt-1 w-full text-xs bg-white border border-gray-300 rounded-lg px-3 py-2"
+                  className="mt-1 w-full text-xs bg-white border border-gray-300 rounded-xl px-3 py-2"
                 />
               </div>
 
@@ -316,7 +401,7 @@ export const TripHomeScreen: React.FC<TripHomeScreenProps> = ({
                   type="number"
                   value={slotDuration}
                   onChange={(e) => setSlotDuration(parseInt(e.target.value) || 60)}
-                  className="mt-1 w-full text-xs bg-white border border-gray-300 rounded-lg px-3 py-2"
+                  className="mt-1 w-full text-xs bg-white border border-gray-300 rounded-xl px-3 py-2"
                 />
               </div>
             </div>
@@ -325,24 +410,24 @@ export const TripHomeScreen: React.FC<TripHomeScreenProps> = ({
               <label className="block text-[11px] font-semibold text-gray-700">Notes / Explanation</label>
               <input
                 type="text"
-                placeholder="Why should we include this?"
+                placeholder="Why should we include this activity?"
                 value={slotExplanation}
                 onChange={(e) => setSlotExplanation(e.target.value)}
-                className="mt-1 w-full text-xs bg-white border border-gray-300 rounded-lg px-3 py-2"
+                className="mt-1 w-full text-xs bg-white border border-gray-300 rounded-xl px-3.5 py-2.5"
               />
             </div>
 
             <div className="flex justify-end space-x-2 pt-2">
               <button
                 onClick={() => setShowAddSlotDay(null)}
-                className="px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 rounded-lg"
+                className="px-3.5 py-1.5 text-xs text-gray-600 hover:bg-gray-100 rounded-xl"
               >
                 Cancel
               </button>
               <button
                 onClick={() => handleAddSlot(showAddSlotDay)}
                 disabled={addingSlot || !slotTitle.trim()}
-                className="px-4 py-1.5 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-lg disabled:opacity-50"
+                className="px-4 py-1.5 text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-xl disabled:opacity-50 shadow-sm"
               >
                 {addingSlot ? 'Adding...' : 'Add Slot'}
               </button>
@@ -350,18 +435,20 @@ export const TripHomeScreen: React.FC<TripHomeScreenProps> = ({
           </div>
         )}
 
+        {/* Render Days */}
         {Object.keys(days).length === 0 ? (
-          <div className="bg-white p-8 rounded-xl border border-gray-200 text-center text-gray-500">
-            No slot items in this itinerary yet. Click "Add Activity Slot" above to propose your first activity!
+          <div className="bg-white p-12 rounded-3xl border border-gray-200 text-center text-gray-500">
+            <p className="text-base font-semibold mb-2">No activity slots in this itinerary yet.</p>
+            <p className="text-xs text-gray-400 mb-4">Click "Add Activity Slot" above to propose your first activity for Day 1.</p>
           </div>
         ) : (
           Object.entries(days).map(([dayIdx, dayItems]) => (
-            <div key={dayIdx} className="bg-white rounded-xl border border-gray-200 overflow-hidden shadow-xs">
+            <div key={dayIdx} className="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-xs">
               <div className="bg-gray-50 px-6 py-3 border-b border-gray-200 flex justify-between items-center">
                 <span className="font-bold text-gray-800 text-sm">Day {dayIdx}</span>
                 <button
                   onClick={() => setShowAddSlotDay(parseInt(dayIdx))}
-                  className="text-xs font-semibold text-blue-600 hover:underline flex items-center"
+                  className="text-xs font-bold text-blue-600 hover:underline flex items-center"
                 >
                   <Plus className="w-3 h-3 mr-1" /> Add to Day {dayIdx}
                 </button>
@@ -371,12 +458,14 @@ export const TripHomeScreen: React.FC<TripHomeScreenProps> = ({
                 {dayItems.map((item) => (
                   <div
                     key={item.item_id}
-                    onClick={() => onOpenSlot(item)}
-                    className="p-4 hover:bg-blue-50/40 transition-colors cursor-pointer flex items-center justify-between group"
+                    onClick={() => navigate(`/trips/${trip.trip_id}/slots/${item.item_id}`)}
+                    className="p-5 hover:bg-blue-50/40 transition-colors cursor-pointer flex items-center justify-between group"
                   >
                     <div className="space-y-1">
                       <div className="flex items-center space-x-2">
-                        <span className="font-semibold text-gray-900 text-sm">{item.title}</span>
+                        <span className="font-semibold text-gray-900 text-sm group-hover:text-blue-600 transition-colors">
+                          {item.title}
+                        </span>
                         <StatusBadge status={item.status} />
                         {item.locked && (
                           <span title="Locked constraint" className="text-amber-600 flex items-center text-xs">
@@ -397,14 +486,14 @@ export const TripHomeScreen: React.FC<TripHomeScreenProps> = ({
                         <button
                           onClick={(e) => handleConfirmSlot(item.item_id, e)}
                           title="Confirm this slot"
-                          className="px-2.5 py-1 text-xs rounded-md font-semibold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 flex items-center border border-emerald-200"
+                          className="px-3 py-1.5 text-xs rounded-xl font-bold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 flex items-center border border-emerald-200 transition-colors"
                         >
-                          <CheckCircle className="w-3 h-3 mr-1" />
+                          <CheckCircle className="w-3.5 h-3.5 mr-1" />
                           Confirm
                         </button>
                       )}
 
-                      <span className="text-xs font-medium text-blue-600 group-hover:underline">
+                      <span className="text-xs font-bold text-blue-600 group-hover:underline">
                         View Debate
                       </span>
                       <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-blue-600 transition-colors" />

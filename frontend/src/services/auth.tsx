@@ -1,53 +1,117 @@
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useState, useEffect } from 'react';
 import type { User } from '../types';
+import { ApiService } from './api';
 
 interface AuthContextType {
   currentUser: User | null;
   setCurrentUser: (u: User | null) => void;
+  token: string | null;
   userId: string;
-  setUserId: (id: string) => void;
-  availableSeedUsers: { id: string; name: string; role: string }[];
+  isAuthenticated: boolean;
+  isLoading: boolean;
+  login: (email: string) => Promise<User>;
+  register: (data: {
+    display_name: string;
+    email: string;
+    travel_style?: string;
+    budget_band?: string;
+    traveller_type?: string;
+    pace?: string;
+    interests?: string;
+  }) => Promise<User>;
+  logout: () => void;
 }
-
-const DEFAULT_USERS = [
-  { id: 'usr_0f22b1', name: 'Alex Carter (Owner)', role: 'Trip Admin' },
-  { id: 'usr_1a2b3c', name: 'Rohan Sharma', role: 'Trip Member' },
-  { id: 'usr_2d3e4f', name: 'Priya Patel', role: 'Trip Member' },
-  { id: 'usr_3g4h5i', name: 'Ananya Iyer', role: 'Solo Traveller' },
-];
 
 const AuthContext = createContext<AuthContextType>({
   currentUser: null,
   setCurrentUser: () => {},
-  userId: DEFAULT_USERS[0].id,
-  setUserId: () => {},
-  availableSeedUsers: DEFAULT_USERS,
+  token: null,
+  userId: '',
+  isAuthenticated: false,
+  isLoading: true,
+  login: async () => { throw new Error('AuthContext not initialized'); },
+  register: async () => { throw new Error('AuthContext not initialized'); },
+  logout: () => {},
 });
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [userId, setUserId] = useState<string>(DEFAULT_USERS[0].id);
-  const [currentUser, setCurrentUser] = useState<User | null>({
-    user_id: DEFAULT_USERS[0].id,
-    display_name: DEFAULT_USERS[0].name,
-    email: 'alex.carter@example.invalid',
-    home_city_id: 'cty_b52d9a',
-    home_currency: 'INR',
-    locale: 'en-IN',
-    budget_band: 'mid',
-    travel_style: 'comfort',
-    traveller_type: 'friends',
-    segment: 'heavy',
-    status: 'active',
-  });
+  const [currentUser, setCurrentUserState] = useState<User | null>(null);
+  const [token, setToken] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+
+  useEffect(() => {
+    const savedToken = localStorage.getItem('wandermatch_token');
+    const savedUser = localStorage.getItem('wandermatch_user');
+
+    if (savedToken && savedUser) {
+      try {
+        const parsed = JSON.parse(savedUser);
+        setCurrentUserState(parsed);
+        setToken(savedToken);
+      } catch (e) {
+        console.error('Failed to parse saved user:', e);
+        localStorage.removeItem('wandermatch_token');
+        localStorage.removeItem('wandermatch_user');
+      }
+    }
+    setIsLoading(false);
+  }, []);
+
+  const setCurrentUser = (u: User | null) => {
+    setCurrentUserState(u);
+    if (u) {
+      localStorage.setItem('wandermatch_user', JSON.stringify(u));
+    } else {
+      localStorage.removeItem('wandermatch_user');
+    }
+  };
+
+  const login = async (email: string): Promise<User> => {
+    const res = await ApiService.login(email);
+    setCurrentUser(res.user);
+    setToken(res.token);
+    localStorage.setItem('wandermatch_token', res.token);
+    return res.user;
+  };
+
+  const register = async (data: {
+    display_name: string;
+    email: string;
+    travel_style?: string;
+    budget_band?: string;
+    traveller_type?: string;
+    pace?: string;
+    interests?: string;
+  }): Promise<User> => {
+    const res = await ApiService.register(data);
+    setCurrentUser(res.user);
+    setToken(res.token);
+    localStorage.setItem('wandermatch_token', res.token);
+    return res.user;
+  };
+
+  const logout = () => {
+    setCurrentUser(null);
+    setToken(null);
+    localStorage.removeItem('wandermatch_token');
+    localStorage.removeItem('wandermatch_user');
+  };
+
+  const userId = currentUser?.user_id || '';
+  const isAuthenticated = !!currentUser;
 
   return (
     <AuthContext.Provider
       value={{
         currentUser,
         setCurrentUser,
+        token,
         userId,
-        setUserId,
-        availableSeedUsers: DEFAULT_USERS,
+        isAuthenticated,
+        isLoading,
+        login,
+        register,
+        logout,
       }}
     >
       {children}

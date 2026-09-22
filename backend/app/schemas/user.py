@@ -53,3 +53,23 @@ class UserProfileUpdateRequest(BaseModel):
     interests: Optional[str] = None     # comma-separated
     preferred_languages: Optional[str] = None
     traveller_type: Optional[str] = None
+
+class UserLoginRequest(BaseModel):
+    email: str
+
+class UserRegisterRequest(BaseModel):
+    display_name: str
+    email: str
+    home_city_id: Optional[str] = "cty_c07454f1"
+    home_currency: Optional[str] = "INR"
+    locale: Optional[str] = "en-IN"
+    budget_band: Optional[str] = "mid"
+    travel_style: Optional[str] = "comfort"
+    traveller_type: Optional[str] = "solo"
+    pace: Optional[str] = "balanced"
+    interests: Optional[str] = "heritage,food"
+
+class AuthResponse(BaseModel):
+    user: UserProfile
+    token: str
+

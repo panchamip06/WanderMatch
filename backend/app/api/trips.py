@@ -64,6 +64,50 @@ async def list_trips(
     trips = result.scalars().all()
     return [build_trip_out(t) for t in trips]
 
+@router.get("/user/my", response_model=List[TripOut])
+async def list_my_trips(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """List trips owned by or joined by the authenticated user."""
+    member_subquery = select(TripMember.trip_id).where(TripMember.user_id == current_user.user_id)
+    stmt = (
+        select(Trip)
+        .where(
+            (Trip.owner_user_id == current_user.user_id) |
+            (Trip.trip_id.in_(member_subquery))
+        )
+        .order_by(Trip.created_at.desc())
+    )
+    result = await db.execute(stmt)
+    trips = result.scalars().all()
+    seen = set()
+    unique_trips = []
+    for t in trips:
+        if t.trip_id not in seen:
+            seen.add(t.trip_id)
+            unique_trips.append(build_trip_out(t))
+    return unique_trips
+
+@router.get("/discover", response_model=List[TripOut])
+async def list_discoverable_trips(
+    limit: int = Query(50, ge=1, le=200),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_db)
+):
+    """List discoverable public group trips available to join."""
+    stmt = select(Trip).where(Trip.is_group_trip == True)
+    if current_user:
+        member_subquery = select(TripMember.trip_id).where(TripMember.user_id == current_user.user_id)
+        stmt = stmt.where(
+            Trip.owner_user_id != current_user.user_id,
+            ~Trip.trip_id.in_(member_subquery)
+        )
+    stmt = stmt.order_by(Trip.created_at.desc()).limit(limit)
+    result = await db.execute(stmt)
+    trips = result.scalars().all()
+    return [build_trip_out(t) for t in trips]
+
 @router.get("/{trip_id}", response_model=TripDetailOut)
 async def get_trip_detail(
     trip_id: str,
@@ -112,7 +156,12 @@ async def create_trip(
     now_iso = datetime.now(timezone.utc).isoformat()
     trip_id = f"trp_{uuid.uuid4().hex[:8]}"
 
-    owner_id = current_user.user_id if current_user else "usr_0f22b1"
+    if not current_user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required to create a trip. Please sign in.",
+        )
+    owner_id = current_user.user_id
 
     # Encode trip_mode in notes (Rule R1 compliant additive storage)
     notes_with_mode = f"[mode:{req.trip_mode}] {req.notes or ''}".strip()

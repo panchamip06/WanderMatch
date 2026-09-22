@@ -3,16 +3,20 @@ import uuid
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 
 from backend.app.core.database import get_db
 from backend.app.core.security import get_current_user, security
 from backend.app.models.ps11 import User, UserPreference
-from backend.app.schemas.user import UserProfile, UserSyncRequest, UserProfileUpdateRequest
+from backend.app.schemas.user import (
+    UserProfile, UserSyncRequest, UserProfileUpdateRequest,
+    UserLoginRequest, UserRegisterRequest, AuthResponse
+)
 from backend.services.auth.firebase import verify_token
 
 router = APIRouter(prefix="/api/auth", tags=["Auth"])
+
 
 @router.get("/me", response_model=UserProfile)
 async def get_my_profile(
@@ -27,6 +31,97 @@ async def get_my_profile(
     )
     res = await db.execute(stmt)
     return res.scalar_one()
+
+@router.post("/login", response_model=AuthResponse)
+async def login(
+    req: UserLoginRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """Authenticate user by email or user ID and return profile + session token."""
+    identifier = req.email.strip().lower()
+    stmt = (
+        select(User)
+        .where((func.lower(User.email) == identifier) | (User.user_id == req.email.strip()))
+        .options(selectinload(User.preferences))
+    )
+    res = await db.execute(stmt)
+    user = res.scalar_one_or_none()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User with identifier '{req.email}' not found. Please register an account.",
+        )
+    return AuthResponse(
+        user=user,
+        token=f"mock:{user.user_id}"
+    )
+
+@router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
+async def register(
+    req: UserRegisterRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """Register a new user into `users` table and return profile + session token."""
+    email_clean = req.email.strip().lower()
+    stmt_check = select(User).where(func.lower(User.email) == email_clean)
+    res_check = await db.execute(stmt_check)
+    if res_check.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"An account with email '{req.email}' already exists.",
+        )
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    today_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    user_id = f"usr_{uuid.uuid4().hex[:8]}"
+
+    new_user = User(
+        user_id=user_id,
+        display_name=req.display_name.strip(),
+        email=email_clean,
+        home_city_id=req.home_city_id or "cty_c07454f1",
+        home_currency=req.home_currency or "INR",
+        locale=req.locale or "en-IN",
+        budget_band=req.budget_band or "mid",
+        travel_style=req.travel_style or "comfort",
+        traveller_type=req.traveller_type or "solo",
+        segment="cold_start",
+        date_of_signup=today_date,
+        loyalty_tier=None,
+        status="active",
+        created_at=now_iso,
+        updated_at=now_iso,
+    )
+    db.add(new_user)
+
+    pref = UserPreference(
+        preference_id=f"prf_{uuid.uuid4().hex[:8]}",
+        user_id=user_id,
+        preferred_languages=req.locale or "en-IN",
+        guide_language=req.locale or "en-IN",
+        interests=req.interests or "heritage,food",
+        dietary_flags=None,
+        accessibility_needs=None,
+        preferred_currency=req.home_currency or "INR",
+        max_daily_budget="4000.00",
+        max_daily_budget_currency=req.home_currency or "INR",
+        pace=req.pace or "balanced",
+        updated_at=now_iso,
+    )
+    db.add(pref)
+    new_user.preferences = pref
+
+    await db.commit()
+
+    stmt_reload = select(User).where(User.user_id == user_id).options(selectinload(User.preferences))
+    res_reload = await db.execute(stmt_reload)
+    user = res_reload.scalar_one()
+
+    return AuthResponse(
+        user=user,
+        token=f"mock:{user.user_id}"
+    )
+
 
 @router.put("/profile", response_model=UserProfile)
 async def update_my_profile(

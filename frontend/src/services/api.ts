@@ -3,12 +3,17 @@ import type { Trip, Proposal, Vote, User, ItineraryItem } from '../types';
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 export class ApiService {
-  private static getHeaders(userId?: string): HeadersInit {
+  private static getHeaders(tokenOrUserId?: string): HeadersInit {
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
     };
-    if (userId) {
-      headers['Authorization'] = `Bearer mock:${userId}`;
+    const token = tokenOrUserId || localStorage.getItem('wandermatch_token');
+    if (token) {
+      if (token.startsWith('mock:') || token.startsWith('eyJ') || token.startsWith('Bearer ')) {
+        headers['Authorization'] = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
+      } else {
+        headers['Authorization'] = `Bearer mock:${token}`;
+      }
     }
     return headers;
   }
@@ -16,6 +21,42 @@ export class ApiService {
   static async checkHealth(): Promise<any> {
     const res = await fetch(`${API_BASE_URL}/health`);
     if (!res.ok) throw new Error(`Health check failed: ${res.statusText}`);
+    return res.json();
+  }
+
+  // Authentication
+  static async login(email: string): Promise<{ user: User; token: string }> {
+    const res = await fetch(`${API_BASE_URL}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Login failed');
+    }
+    return res.json();
+  }
+
+  static async register(data: {
+    display_name: string;
+    email: string;
+    home_city_id?: string;
+    travel_style?: string;
+    budget_band?: string;
+    traveller_type?: string;
+    pace?: string;
+    interests?: string;
+  }): Promise<{ user: User; token: string }> {
+    const res = await fetch(`${API_BASE_URL}/api/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Registration failed');
+    }
     return res.json();
   }
 
@@ -52,14 +93,32 @@ export class ApiService {
   }
 
   // Trips
+  static async getMyTrips(tokenOrUserId?: string): Promise<Trip[]> {
+    const res = await fetch(`${API_BASE_URL}/api/trips/user/my`, {
+      headers: this.getHeaders(tokenOrUserId),
+    });
+    if (!res.ok) throw new Error(`Failed to fetch my trips: ${res.statusText}`);
+    return res.json();
+  }
+
+  static async getDiscoverTrips(tokenOrUserId?: string): Promise<Trip[]> {
+    const res = await fetch(`${API_BASE_URL}/api/trips/discover`, {
+      headers: this.getHeaders(tokenOrUserId),
+    });
+    if (!res.ok) throw new Error(`Failed to fetch discoverable trips: ${res.statusText}`);
+    return res.json();
+  }
+
   static async getTrips(isGroup = true): Promise<Trip[]> {
     const res = await fetch(`${API_BASE_URL}/api/trips?is_group=${isGroup}&limit=30`);
     if (!res.ok) throw new Error(`Failed to fetch trips: ${res.statusText}`);
     return res.json();
   }
 
-  static async getTripDetail(tripId: string): Promise<Trip> {
-    const res = await fetch(`${API_BASE_URL}/api/trips/${tripId}`);
+  static async getTripDetail(tripId: string, tokenOrUserId?: string): Promise<Trip> {
+    const res = await fetch(`${API_BASE_URL}/api/trips/${tripId}`, {
+      headers: this.getHeaders(tokenOrUserId),
+    });
     if (!res.ok) throw new Error(`Failed to fetch trip detail: ${res.statusText}`);
     return res.json();
   }
