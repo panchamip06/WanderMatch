@@ -6,6 +6,7 @@ from backend.app.core.database import get_db
 router = APIRouter(tags=["Health"])
 
 @router.get("/health")
+@router.get("/api/health")
 async def health_check(db: AsyncSession = Depends(get_db)):
     """Health check endpoint confirming FastAPI orchestrator and database connectivity."""
     db_status = "error"

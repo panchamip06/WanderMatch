@@ -48,15 +48,24 @@ export const FindTripPage: React.FC = () => {
         Back to Dashboard
       </Link>
 
-      {/* Upcoming Feature Notice Banner */}
-      <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 text-amber-900 flex items-start space-x-3">
-        <Sparkles className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
-        <div className="text-xs sm:text-sm">
-          <span className="font-bold">Phase 4 Upcoming Feature: AI Matching Engine.</span>
-          <p className="mt-0.5 text-amber-800">
-            Automated solo traveller personality matching and vector embedding search will arrive in Phase 4. For now, you can explore and join all open public group trips directly below.
-          </p>
+      {/* Live AI Matching Banner */}
+      <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 text-blue-900 flex items-center justify-between gap-4">
+        <div className="flex items-start space-x-3">
+          <Sparkles className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+          <div className="text-xs sm:text-sm">
+            <span className="font-bold">AI Solo-to-Group & Guide Matching Available</span>
+            <p className="mt-0.5 text-blue-800">
+              Get personalized compatibility scores and explainable match reasons for group trips and certified guides.
+            </p>
+          </div>
         </div>
+        <Link
+          to="/solo-match"
+          className="inline-flex items-center px-3.5 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex-shrink-0 shadow-xs transition-colors"
+        >
+          Explore Matches
+          <ArrowRight className="w-3.5 h-3.5 ml-1" />
+        </Link>
       </div>
 
       {/* Search Header */}

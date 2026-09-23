@@ -7,7 +7,7 @@ import { useAuth } from '../services/auth';
 import { TripWebSocketClient } from '../services/websocket';
 import {
   Calendar, MapPin, Users, Lock, ChevronRight, Sparkles,
-  Plus, Crown, CheckCircle, ArrowLeft, Copy, Check, MessageSquare, GitBranch
+  Plus, Crown, CheckCircle, ArrowLeft, Copy, Check, MessageSquare, GitBranch, Camera
 } from 'lucide-react';
 
 interface TripHomeScreenProps {
@@ -265,6 +265,13 @@ export const TripHomeScreen: React.FC<TripHomeScreenProps> = ({
             >
               <GitBranch className="w-4 h-4 mr-1.5 text-amber-600" />
               Branches
+            </Link>
+            <Link
+              to={`/trips/${trip.trip_id}/photos`}
+              className="inline-flex items-center px-3.5 py-2 rounded-xl text-xs font-bold bg-pink-50 text-pink-700 hover:bg-pink-100 border border-pink-200 transition-colors shadow-2xs"
+            >
+              <Camera className="w-4 h-4 mr-1.5 text-pink-600" />
+              Photos
             </Link>
           </div>
         </div>
