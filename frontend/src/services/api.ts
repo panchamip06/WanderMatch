@@ -1,6 +1,7 @@
 import type {
   Trip, Proposal, Vote, User, ItineraryItem,
-  AICandidateOut, BranchTriggerOut, Branch, BranchRevision, ChatMessage
+  AICandidateOut, BranchTriggerOut, Branch, BranchRevision, ChatMessage,
+  GroupMatch, GuideMatch, FaceProfile, Photo
 } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
@@ -401,6 +402,110 @@ export class ApiService {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.detail || 'Failed to send chat message');
     }
+    return res.json();
+  }
+
+  // --- Phase 6: Matching ---
+  static async getGroupMatches(limit = 15, userId?: string): Promise<GroupMatch[]> {
+    const res = await fetch(`${API_BASE_URL}/api/matching/groups?limit=${limit}`, {
+      headers: this.getHeaders(userId),
+    });
+    if (!res.ok) throw new Error('Failed to fetch group matches');
+    return res.json();
+  }
+
+  static async getGuideMatches(
+    params?: { city_id?: string; language?: string; specialisation?: string; max_price?: number; limit?: number },
+    userId?: string
+  ): Promise<GuideMatch[]> {
+    const q = new URLSearchParams();
+    if (params?.city_id) q.set('city_id', params.city_id);
+    if (params?.language) q.set('language', params.language);
+    if (params?.specialisation) q.set('specialisation', params.specialisation);
+    if (params?.max_price) q.set('max_price', String(params.max_price));
+    if (params?.limit) q.set('limit', String(params.limit));
+
+    const res = await fetch(`${API_BASE_URL}/api/matching/guides?${q.toString()}`, {
+      headers: this.getHeaders(userId),
+    });
+    if (!res.ok) throw new Error('Failed to fetch guide matches');
+    return res.json();
+  }
+
+  // --- Phase 6: Face Registration ---
+  static async registerFace(
+    data: { photo_straight: string; photo_left: string; photo_right: string },
+    userId?: string
+  ): Promise<FaceProfile> {
+    const res = await fetch(`${API_BASE_URL}/api/face/register`, {
+      method: 'POST',
+      headers: this.getHeaders(userId),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Face registration failed');
+    }
+    return res.json();
+  }
+
+  static async getFaceProfile(userId?: string): Promise<FaceProfile | null> {
+    const res = await fetch(`${API_BASE_URL}/api/face/profile`, {
+      headers: this.getHeaders(userId),
+    });
+    if (!res.ok) return null;
+    return res.json();
+  }
+
+  // --- Phase 6: Photos ---
+  static async uploadTripPhoto(
+    tripId: string,
+    data: { image_data: string; caption?: string },
+    userId?: string
+  ): Promise<Photo> {
+    const res = await fetch(`${API_BASE_URL}/api/trips/${tripId}/photos`, {
+      method: 'POST',
+      headers: this.getHeaders(userId),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to upload photo');
+    }
+    return res.json();
+  }
+
+  static async getTripPhotos(tripId: string, userId?: string): Promise<Photo[]> {
+    const res = await fetch(`${API_BASE_URL}/api/trips/${tripId}/photos`, {
+      headers: this.getHeaders(userId),
+    });
+    if (!res.ok) throw new Error('Failed to fetch trip photos');
+    return res.json();
+  }
+
+  static async getMyPhotos(tripId?: string, userId?: string): Promise<Photo[]> {
+    const url = tripId
+      ? `${API_BASE_URL}/api/photos/my?trip_id=${tripId}`
+      : `${API_BASE_URL}/api/photos/my`;
+    const res = await fetch(url, {
+      headers: this.getHeaders(userId),
+    });
+    if (!res.ok) throw new Error('Failed to fetch personal photos');
+    return res.json();
+  }
+
+  static async confirmPhotoTag(
+    photoId: string,
+    tagId: string,
+    isConfirmed = true,
+    userId?: string
+  ): Promise<any> {
+    const res = await fetch(`${API_BASE_URL}/api/photos/${photoId}/tags/${tagId}/confirm`, {
+      method: 'PATCH',
+      headers: this.getHeaders(userId),
+      body: JSON.stringify({ is_confirmed: isConfirmed }),
+    });
+    if (!res.ok) throw new Error('Failed to confirm photo tag');
     return res.json();
   }
 }

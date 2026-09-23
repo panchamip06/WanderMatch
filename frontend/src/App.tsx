@@ -19,6 +19,7 @@ import { BranchViewScreen } from './screens/BranchViewScreen';
 import { TripChatScreen } from './screens/TripChatScreen';
 import { SoloMatchScreen } from './screens/SoloMatchScreen';
 import { FaceRegistrationScreen } from './screens/FaceRegistrationScreen';
+import { MyPhotosScreen } from './screens/MyPhotosScreen';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated, isLoading } = useAuth();
@@ -138,6 +139,22 @@ const MainLayout: React.FC = () => {
             element={
               <ProtectedRoute>
                 <TripChatScreen />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/trips/:tripId/photos"
+            element={
+              <ProtectedRoute>
+                <MyPhotosScreen />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/photos"
+            element={
+              <ProtectedRoute>
+                <MyPhotosScreen />
               </ProtectedRoute>
             }
           />

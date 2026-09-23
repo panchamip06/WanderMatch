@@ -21,10 +21,12 @@ share/python-wheels/
 .installed.cfg
 *.egg
 .venv/
+.venv*/
 venv/
 ENV/
 env/
 backend/.venv/
+backend/.venv*/
 
 # Node / Frontend
 node_modules/

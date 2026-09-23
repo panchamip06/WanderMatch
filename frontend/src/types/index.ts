@@ -206,3 +206,66 @@ export interface ChatMessage {
   is_unanimous_override: boolean;
   sent_at: string;
 }
+
+// Phase 6: Matching & Photos Types
+export interface GroupMatch {
+  trip_id: string;
+  title: string;
+  destination_city_id: string;
+  destination_city_name: string;
+  start_date: string;
+  end_date: string;
+  party_size: number;
+  current_members_count: number;
+  trip_mode: string;
+  compatibility_score: number;
+  match_reasons: string[];
+}
+
+export interface GuideMatch {
+  guide_id: string;
+  display_name: string;
+  city_id: string;
+  city_name: string;
+  languages: string[];
+  specialisation: string;
+  secondary_specialisation?: string | null;
+  years_experience: number;
+  rating?: number | null;
+  review_count: number;
+  day_rate: string;
+  half_day_rate: string;
+  currency: string;
+  certified: boolean;
+  bio: string;
+  compatibility_score: number;
+  match_reasons: string[];
+}
+
+export interface FaceProfile {
+  profile_id: string;
+  user_id: string;
+  registered_at: string;
+  has_embeddings: boolean;
+  photo_urls: string[];
+}
+
+export interface PhotoPerson {
+  tag_id: string;
+  photo_id: string;
+  user_id: string;
+  confidence?: number | null;
+  is_confirmed: boolean;
+  tagged_at: string;
+}
+
+export interface Photo {
+  photo_id: string;
+  trip_id: string;
+  uploader_user_id: string;
+  cloudinary_url: string;
+  thumbnail_url?: string | null;
+  caption?: string | null;
+  uploaded_at: string;
+  person_tags: PhotoPerson[];
+}
