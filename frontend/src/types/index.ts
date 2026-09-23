@@ -133,3 +133,76 @@ export interface Vote {
 }
 
 export type SlotStatus = 'Empty' | 'Proposing' | 'Voting' | 'Common-Ground' | 'Branching' | 'Confirmed';
+
+// Phase 4: AI Consensus Types
+export interface AICandidate {
+  title: string;
+  rationale: string;
+  cost_delta: string;
+  currency: string;
+  duration_minutes: number;
+  adjustments: string[];
+  accommodated_users: string[];
+}
+
+export interface AICandidateOut {
+  revision_id: string;
+  proposal_id: string;
+  round_number: number;
+  candidate: AICandidate;
+  constraint_valid: boolean;
+  constraint_reason: string;
+  status: 'active' | 'accepted' | 'superseded' | 'rejected';
+  created_at: string;
+}
+
+export interface BranchTriggerOut {
+  action: 'keep_blending' | 'branch';
+  reason: string;
+  suggested_branches: string[];
+}
+
+// Phase 5: Branching & Chat Types
+export interface BranchMember {
+  branch_member_id: string;
+  branch_id: string;
+  user_id: string;
+  status: 'pending' | 'confirmed' | 'modification_requested';
+  confirmed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Branch {
+  branch_id: string;
+  trip_id: string;
+  proposal_id?: string | null;
+  parent_branch_id?: string | null;
+  title: string;
+  preview_deadline: string;
+  status: 'preview' | 'confirmed' | 'rejected' | 'modification_requested';
+  members: BranchMember[];
+  revision_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BranchRevision {
+  revision_id: string;
+  branch_id: string;
+  round_number: number;
+  ai_candidate_json: string;
+  constraint_valid: boolean;
+  constraint_reason: string;
+  status: string;
+  created_at: string;
+}
+
+export interface ChatMessage {
+  message_id: string;
+  trip_id: string;
+  user_id: string;
+  body: string;
+  is_unanimous_override: boolean;
+  sent_at: string;
+}

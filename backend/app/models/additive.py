@@ -111,4 +111,6 @@ class ProposalTimer(Base):
     first_no_at = Column(String, nullable=False)
     expires_at = Column(String, nullable=False)
     is_expired = Column(Boolean, default=False, nullable=False)
+    # Tracks the current AI consensus round for this proposal (soft cap: 3 rounds per design §5A)
+    ai_round_number = Column(Integer, default=0, nullable=False)
 

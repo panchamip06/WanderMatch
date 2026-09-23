@@ -38,3 +38,20 @@ async def init_db() -> None:
     from backend.app.models import additive  # Ensure additive models are registered
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Additive column migration: add ai_round_number to proposal_timers if absent.
+        # SQLite does not support ADD COLUMN IF NOT EXISTS, so we probe via PRAGMA.
+        await conn.run_sync(_migrate_proposal_timers)
+
+
+def _migrate_proposal_timers(sync_conn) -> None:
+    """Add ai_round_number to proposal_timers if the column does not already exist."""
+    cursor = sync_conn.execute(
+        __import__("sqlalchemy").text("PRAGMA table_info(proposal_timers)")
+    )
+    columns = {row[1] for row in cursor}  # row[1] is column name in PRAGMA result
+    if "ai_round_number" not in columns:
+        sync_conn.execute(
+            __import__("sqlalchemy").text(
+                "ALTER TABLE proposal_timers ADD COLUMN ai_round_number INTEGER NOT NULL DEFAULT 0"
+            )
+        )

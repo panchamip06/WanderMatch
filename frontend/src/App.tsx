@@ -124,6 +124,24 @@ const MainLayout: React.FC = () => {
             }
           />
 
+          {/* Trip-contextual routes */}
+          <Route
+            path="/trips/:tripId/branches"
+            element={
+              <ProtectedRoute>
+                <BranchViewScreen />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/trips/:tripId/chat"
+            element={
+              <ProtectedRoute>
+                <TripChatScreen />
+              </ProtectedRoute>
+            }
+          />
+
           {/* Preserved prototype screens */}
           <Route
             path="/branch-view"

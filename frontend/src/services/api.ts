@@ -1,4 +1,7 @@
-import type { Trip, Proposal, Vote, User, ItineraryItem } from '../types';
+import type {
+  Trip, Proposal, Vote, User, ItineraryItem,
+  AICandidateOut, BranchTriggerOut, Branch, BranchRevision, ChatMessage
+} from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -238,6 +241,165 @@ export class ApiService {
       const error: any = new Error(err.detail || `Failed to resolve proposal (${res.status})`);
       error.status = res.status;
       throw error;
+    }
+    return res.json();
+  }
+
+  // --- Phase 4: AI Consensus ---
+  static async invokeConsensus(
+    tripId: string,
+    proposalId: string,
+    notes?: string,
+    userId?: string
+  ): Promise<AICandidateOut> {
+    const res = await fetch(`${API_BASE_URL}/api/trips/${tripId}/proposals/${proposalId}/consensus/invoke`, {
+      method: 'POST',
+      headers: this.getHeaders(userId),
+      body: JSON.stringify({ notes }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to invoke AI consensus');
+    }
+    return res.json();
+  }
+
+  static async getCandidates(
+    tripId: string,
+    proposalId: string,
+    userId?: string
+  ): Promise<AICandidateOut[]> {
+    const res = await fetch(`${API_BASE_URL}/api/trips/${tripId}/proposals/${proposalId}/consensus/candidates`, {
+      headers: this.getHeaders(userId),
+    });
+    if (!res.ok) throw new Error('Failed to fetch AI candidates');
+    return res.json();
+  }
+
+  static async classifyBranchTrigger(
+    tripId: string,
+    proposalId: string,
+    userId?: string
+  ): Promise<BranchTriggerOut> {
+    const res = await fetch(`${API_BASE_URL}/api/trips/${tripId}/proposals/${proposalId}/consensus/branch-trigger`, {
+      method: 'POST',
+      headers: this.getHeaders(userId),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to evaluate branch trigger');
+    }
+    return res.json();
+  }
+
+  // --- Phase 5: Branching ---
+  static async getBranches(tripId: string, userId?: string): Promise<Branch[]> {
+    const res = await fetch(`${API_BASE_URL}/api/trips/${tripId}/branches`, {
+      headers: this.getHeaders(userId),
+    });
+    if (!res.ok) throw new Error('Failed to fetch branches');
+    return res.json();
+  }
+
+  static async getBranchDetail(tripId: string, branchId: string, userId?: string): Promise<Branch> {
+    const res = await fetch(`${API_BASE_URL}/api/trips/${tripId}/branches/${branchId}`, {
+      headers: this.getHeaders(userId),
+    });
+    if (!res.ok) throw new Error('Failed to fetch branch detail');
+    return res.json();
+  }
+
+  static async createBranch(
+    tripId: string,
+    data: {
+      title: string;
+      proposal_id?: string;
+      parent_branch_id?: string;
+      member_user_ids?: string[];
+      preview_deadline?: string;
+    },
+    userId?: string
+  ): Promise<Branch> {
+    const res = await fetch(`${API_BASE_URL}/api/trips/${tripId}/branches`, {
+      method: 'POST',
+      headers: this.getHeaders(userId),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to create branch');
+    }
+    return res.json();
+  }
+
+  static async updateBranchMemberStatus(
+    tripId: string,
+    branchId: string,
+    status: 'confirmed' | 'modification_requested',
+    userId?: string
+  ): Promise<Branch> {
+    const res = await fetch(`${API_BASE_URL}/api/trips/${tripId}/branches/${branchId}/member-status`, {
+      method: 'PATCH',
+      headers: this.getHeaders(userId),
+      body: JSON.stringify({ status }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to update member status');
+    }
+    return res.json();
+  }
+
+  static async finalizeBranch(tripId: string, branchId: string, userId?: string): Promise<Branch> {
+    const res = await fetch(`${API_BASE_URL}/api/trips/${tripId}/branches/${branchId}/finalize`, {
+      method: 'POST',
+      headers: this.getHeaders(userId),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to finalize branch');
+    }
+    return res.json();
+  }
+
+  static async generateBranchRevision(
+    tripId: string,
+    branchId: string,
+    userId?: string
+  ): Promise<BranchRevision> {
+    const res = await fetch(`${API_BASE_URL}/api/trips/${tripId}/branches/${branchId}/revision`, {
+      method: 'POST',
+      headers: this.getHeaders(userId),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to generate branch revision');
+    }
+    return res.json();
+  }
+
+  // --- Phase 5: Mandatory Trip Chat ---
+  static async getChatMessages(tripId: string, userId?: string): Promise<ChatMessage[]> {
+    const res = await fetch(`${API_BASE_URL}/api/trips/${tripId}/chat`, {
+      headers: this.getHeaders(userId),
+    });
+    if (!res.ok) throw new Error('Failed to fetch chat messages');
+    return res.json();
+  }
+
+  static async sendChatMessage(
+    tripId: string,
+    data: { body: string; is_unanimous_override?: boolean },
+    userId?: string
+  ): Promise<ChatMessage> {
+    const res = await fetch(`${API_BASE_URL}/api/trips/${tripId}/chat`, {
+      method: 'POST',
+      headers: this.getHeaders(userId),
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || 'Failed to send chat message');
     }
     return res.json();
   }

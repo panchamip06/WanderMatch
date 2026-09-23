@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import type { Trip, ItineraryItem, Proposal } from '../types';
+import type { Trip, ItineraryItem, Proposal, AICandidateOut, BranchTriggerOut } from '../types';
 import { ApiService } from '../services/api';
 import { useAuth } from '../services/auth';
 import { TripWebSocketClient } from '../services/websocket';
@@ -17,7 +17,11 @@ import {
   X,
   Users,
   AlertTriangle,
-  ArrowLeft
+  ArrowLeft,
+  Sparkles,
+  GitBranch,
+  RefreshCw,
+  ShieldCheck
 } from 'lucide-react';
 
 interface SlotDetailScreenProps {
@@ -53,6 +57,12 @@ export const SlotDetailScreen: React.FC<SlotDetailScreenProps> = ({
   const [conflictMsg, setConflictMsg] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
+  // Phase 4: AI Consensus State
+  const [candidatesByProp, setCandidatesByProp] = useState<{ [propId: string]: AICandidateOut[] }>({});
+  const [branchTriggerByProp, setBranchTriggerByProp] = useState<{ [propId: string]: BranchTriggerOut }>({});
+  const [invokingAI, setInvokingAI] = useState<{ [propId: string]: boolean }>({});
+  const [evaluatingBranch, setEvaluatingBranch] = useState<{ [propId: string]: boolean }>({});
+
   // New proposal form state
   const [showNewProp, setShowNewProp] = useState(false);
   const [newTitle, setNewTitle] = useState('');
@@ -81,6 +91,23 @@ export const SlotDetailScreen: React.FC<SlotDetailScreenProps> = ({
 
       const fetchedProposals = await ApiService.getProposals(effectiveTripId);
       setProposals(fetchedProposals);
+
+      // Load AI candidates for each proposal in parallel
+      const candsMap: { [propId: string]: AICandidateOut[] } = {};
+      await Promise.all(
+        fetchedProposals.map(async (p) => {
+          try {
+            const cands = await ApiService.getCandidates(effectiveTripId, p.proposal_id, token || undefined);
+            if (cands && cands.length > 0) {
+              candsMap[p.proposal_id] = cands;
+            }
+          } catch {
+            // no-op if none exist
+          }
+        })
+      );
+      setCandidatesByProp(candsMap);
+
       if (propRefreshProposals) propRefreshProposals();
     } catch (err: any) {
       console.error('Failed to load slot detail data:', err);
@@ -107,7 +134,8 @@ export const SlotDetailScreen: React.FC<SlotDetailScreenProps> = ({
         msg.type === 'vote_cast' ||
         msg.type === 'proposal_created' ||
         msg.type === 'proposal_resolved' ||
-        msg.type === 'itinerary_updated'
+        msg.type === 'itinerary_updated' ||
+        msg.type === 'ai_candidate_ready'
       ) {
         loadData();
       }
@@ -118,6 +146,35 @@ export const SlotDetailScreen: React.FC<SlotDetailScreenProps> = ({
       wsClient.disconnect();
     };
   }, [effectiveTripId, userId, loadData]);
+
+  const handleInvokeAI = async (proposalId: string) => {
+    if (!effectiveTripId) return;
+    setErrorMsg(null);
+    setInvokingAI((prev) => ({ ...prev, [proposalId]: true }));
+    try {
+      const result = await ApiService.invokeConsensus(effectiveTripId, proposalId, undefined, token || undefined);
+      setSuccessMsg(`AI Common-Ground candidate generated for Round ${result.round_number}!`);
+      await loadData();
+    } catch (e: any) {
+      setErrorMsg(e.message || 'Failed to generate AI candidate');
+    } finally {
+      setInvokingAI((prev) => ({ ...prev, [proposalId]: false }));
+    }
+  };
+
+  const handleEvaluateBranch = async (proposalId: string) => {
+    if (!effectiveTripId) return;
+    setErrorMsg(null);
+    setEvaluatingBranch((prev) => ({ ...prev, [proposalId]: true }));
+    try {
+      const res = await ApiService.classifyBranchTrigger(effectiveTripId, proposalId, token || undefined);
+      setBranchTriggerByProp((prev) => ({ ...prev, [proposalId]: res }));
+    } catch (e: any) {
+      setErrorMsg(e.message || 'Failed to evaluate branch trigger');
+    } finally {
+      setEvaluatingBranch((prev) => ({ ...prev, [proposalId]: false }));
+    }
+  };
 
   const handleVote = async (propId: string, value: 'yes' | 'no' | 'abstain') => {
     if (!effectiveTripId) return;
@@ -459,6 +516,146 @@ export const SlotDetailScreen: React.FC<SlotDetailScreenProps> = ({
                         <li key={i}>{r}</li>
                       ))}
                     </ul>
+                  </div>
+                )}
+
+                {/* Phase 4: AI Consensus Common-Ground Candidate Card */}
+                {candidatesByProp[prop.proposal_id] && candidatesByProp[prop.proposal_id].length > 0 && (() => {
+                  const cands = candidatesByProp[prop.proposal_id];
+                  const activeCand = cands.find((c) => c.status === 'active') || cands[cands.length - 1];
+                  if (!activeCand) return null;
+                  return (
+                    <div className="bg-gradient-to-br from-indigo-50/70 to-purple-50/70 border border-indigo-200 rounded-2xl p-4 sm:p-5 space-y-3.5 shadow-2xs">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-indigo-100 pb-3">
+                        <div className="flex items-center space-x-2">
+                          <div className="p-1.5 rounded-lg bg-indigo-600 text-white shadow-2xs">
+                            <Sparkles className="w-4 h-4" />
+                          </div>
+                          <div>
+                            <span className="text-xs font-bold text-indigo-950 block">AI Common-Ground Candidate</span>
+                            <span className="text-[11px] text-indigo-700">Synthesized from member objections & hard constraints</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-indigo-100 text-indigo-800">
+                            Round {activeCand.round_number} of 3
+                          </span>
+                          <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full flex items-center ${
+                            activeCand.constraint_valid ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'
+                          }`}>
+                            <ShieldCheck className="w-3 h-3 mr-1" />
+                            {activeCand.constraint_valid ? 'Constraints Valid' : activeCand.constraint_reason}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <h5 className="font-bold text-sm text-gray-900">{activeCand.candidate.title}</h5>
+                        <p className="text-xs text-gray-700 italic">"{activeCand.candidate.rationale}"</p>
+                        <div className="text-[11px] text-gray-600 flex flex-wrap gap-3 pt-1">
+                          <span>Cost Delta: <strong className="text-gray-800">{activeCand.candidate.currency} {activeCand.candidate.cost_delta}</strong></span>
+                          <span>Duration: <strong className="text-gray-800">{activeCand.candidate.duration_minutes} mins</strong></span>
+                          {activeCand.candidate.accommodated_users?.length > 0 && (
+                            <span>Accommodated: <strong className="text-gray-800">{activeCand.candidate.accommodated_users.join(', ')}</strong></span>
+                          )}
+                        </div>
+                      </div>
+
+                      {activeCand.candidate.adjustments && activeCand.candidate.adjustments.length > 0 && (
+                        <div className="bg-white/80 rounded-xl p-3 border border-indigo-100 space-y-1">
+                          <span className="text-[11px] font-bold text-indigo-900 block">AI Adjustments Made:</span>
+                          <ul className="list-disc list-inside text-xs text-gray-700 space-y-0.5">
+                            {activeCand.candidate.adjustments.map((adj, i) => (
+                              <li key={i}>{adj}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {/* Revision history rounds indicator */}
+                      {cands.length > 1 && (
+                        <div className="text-[11px] text-gray-500 flex items-center space-x-1.5 pt-1">
+                          <RefreshCw className="w-3 h-3 text-gray-400" />
+                          <span>Revision history: {cands.map(c => `R${c.round_number} (${c.status})`).join(' → ')}</span>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {/* AI Consensus / Branching Action Bar */}
+                {prop.status === 'open' && prop.no_votes > 0 && (
+                  <div className="bg-indigo-50/40 border border-indigo-100 rounded-xl p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                    <div className="text-xs text-indigo-950">
+                      <span className="font-bold flex items-center">
+                        <Sparkles className="w-3.5 h-3.5 mr-1.5 text-indigo-600" />
+                        AI Disagreement Resolution:
+                      </span>
+                      <span className="text-[11px] text-gray-500">
+                        Synthesize blended common ground or classify if branching is required.
+                      </span>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        onClick={() => handleInvokeAI(prop.proposal_id)}
+                        disabled={invokingAI[prop.proposal_id] || (candidatesByProp[prop.proposal_id]?.length || 0) >= 3}
+                        className="px-3 py-1.5 rounded-lg text-xs font-bold bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white shadow-2xs flex items-center transition-colors"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 mr-1.5" />
+                        {invokingAI[prop.proposal_id]
+                          ? 'Generating...'
+                          : (candidatesByProp[prop.proposal_id]?.length || 0) >= 3
+                          ? 'Revision Cap Reached (3/3)'
+                          : (candidatesByProp[prop.proposal_id]?.length || 0) > 0
+                          ? 'New AI Revision Round'
+                          : 'Invoke AI Consensus'}
+                      </button>
+
+                      <button
+                        onClick={() => handleEvaluateBranch(prop.proposal_id)}
+                        disabled={evaluatingBranch[prop.proposal_id]}
+                        className="px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-50 hover:bg-amber-100 border border-amber-300 text-amber-900 flex items-center transition-colors"
+                      >
+                        <GitBranch className="w-3.5 h-3.5 mr-1.5 text-amber-700" />
+                        {evaluatingBranch[prop.proposal_id] ? 'Evaluating...' : 'Check Branching Trigger'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Branch Trigger Recommendation Result */}
+                {branchTriggerByProp[prop.proposal_id] && (
+                  <div className={`p-4 rounded-xl border space-y-2 text-xs ${
+                    branchTriggerByProp[prop.proposal_id].action === 'branch'
+                      ? 'bg-amber-50 border-amber-300 text-amber-950'
+                      : 'bg-emerald-50 border-emerald-300 text-emerald-950'
+                  }`}>
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold flex items-center uppercase tracking-wide text-[11px]">
+                        <GitBranch className="w-3.5 h-3.5 mr-1.5" />
+                        Recommendation: {branchTriggerByProp[prop.proposal_id].action === 'branch' ? 'Branching Recommended' : 'Continue Blending'}
+                      </span>
+                      {branchTriggerByProp[prop.proposal_id].action === 'branch' && effectiveTripId && (
+                        <button
+                          onClick={() => navigate(`/trips/${effectiveTripId}/branches`)}
+                          className="px-2.5 py-1 rounded-md bg-amber-600 hover:bg-amber-700 text-white font-bold text-[11px] shadow-2xs"
+                        >
+                          Go to Branch View →
+                        </button>
+                      )}
+                    </div>
+                    <p>{branchTriggerByProp[prop.proposal_id].reason}</p>
+                    {branchTriggerByProp[prop.proposal_id].suggested_branches?.length > 0 && (
+                      <div className="pt-1">
+                        <span className="font-semibold block text-[11px]">Suggested parallel branches:</span>
+                        <ul className="list-disc list-inside space-y-0.5 text-[11px]">
+                          {branchTriggerByProp[prop.proposal_id].suggested_branches.map((b, i) => (
+                            <li key={i}>{b}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                   </div>
                 )}
 

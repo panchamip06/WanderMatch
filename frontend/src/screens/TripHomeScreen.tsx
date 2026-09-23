@@ -7,7 +7,7 @@ import { useAuth } from '../services/auth';
 import { TripWebSocketClient } from '../services/websocket';
 import {
   Calendar, MapPin, Users, Lock, ChevronRight, Sparkles,
-  Plus, Crown, CheckCircle, ArrowLeft, Copy, Check
+  Plus, Crown, CheckCircle, ArrowLeft, Copy, Check, MessageSquare, GitBranch
 } from 'lucide-react';
 
 interface TripHomeScreenProps {
@@ -248,6 +248,24 @@ export const TripHomeScreen: React.FC<TripHomeScreenProps> = ({
                 Members: {trip.members?.length || 1} ({isOwner ? 'You are Admin' : 'Member'})
               </span>
             </div>
+          </div>
+
+          {/* Quick Hub Navigation */}
+          <div className="flex flex-wrap items-center gap-2.5 pt-2 md:pt-0">
+            <Link
+              to={`/trips/${trip.trip_id}/chat`}
+              className="inline-flex items-center px-3.5 py-2 rounded-xl text-xs font-bold bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200 transition-colors shadow-2xs"
+            >
+              <MessageSquare className="w-4 h-4 mr-1.5 text-purple-600" />
+              Trip Chat
+            </Link>
+            <Link
+              to={`/trips/${trip.trip_id}/branches`}
+              className="inline-flex items-center px-3.5 py-2 rounded-xl text-xs font-bold bg-amber-50 text-amber-700 hover:bg-amber-100 border border-amber-200 transition-colors shadow-2xs"
+            >
+              <GitBranch className="w-4 h-4 mr-1.5 text-amber-600" />
+              Branches
+            </Link>
           </div>
         </div>
       </div>
